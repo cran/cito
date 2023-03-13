@@ -3,7 +3,7 @@
 #' @description
 #'
 #' fits a custom deep neural network. dnn() supports the formula syntax and allows to customize the neural network to a maximal degree.
-#' So far, only Multilayer Perceptrons are possible. To learn more about Deep Learning, see [here](https://www.nature.com/articles/nature14539)
+#' So far, only Multilayer Perceptrons are possible.
 #' @param formula an object of class "\code{\link[stats]{formula}}": a description of the model that should be fitted
 #' @param data matrix or data.frame
 #' @param loss loss after which network should be optimized. Can also be distribution from the stats package or own function
@@ -22,8 +22,9 @@
 #' @param lr_scheduler learning rate scheduler created with \code{\link{config_lr_scheduler}}
 #' @param plot plot training loss
 #' @param verbose print training and validation loss of epochs
+#' @param custom_parameters List of parameters/variables to be optimized. Can be used in a custom loss function. See Vignette for example.
 #' @param device device on which network should be trained on.
-#' @param early_stopping if set to integer, training will stop if validation loss worsened between current defined past epoch.
+#' @param early_stopping if set to integer, training will stop if loss has gotten higher for defined number of epochs in a row, will use validation loss is available.
 #'
 #' @details
 #'
@@ -35,6 +36,9 @@
 #' Where \eqn{w_j} is the weight and \eqn{a_j} is the value from neuron j to the current one. a() is the activation function, e.g. \eqn{ relu(x) = max(0,x)}
 #' As regularization methods there is dropout and elastic net regularization available. These methods help you avoid over fitting.
 #'
+#' Training on graphic cards:
+#' If you want to train on your cuda devide, you have to install the NVIDIA CUDA toolkit version 11.3. and cuDNN 8.4. beforehand. Make sure that you have exactly these versions installed, since it does not work with other version.
+#' For more information see [mlverse: 'torch'](https://torch.mlverse.org/docs/articles/installation.html)
 #'
 #' @return an S3 object of class \code{"cito.dnn"} is returned. It is a list containing everything there is to know about the model and its training process.
 #' The list consists of the following attributes:
@@ -54,7 +58,7 @@
 #' @export
 dnn <- function(formula,
                 data = NULL,
-                loss = c("mae", "mse", "softmax", "cross-entropy", "gaussian", "binomial", "poisson"),
+                loss = c("mse", "mae", "softmax", "cross-entropy", "gaussian", "binomial", "poisson"),
                 hidden = c(10L, 10L, 10L),
                 activation = c("relu", "leaky_relu", "tanh", "elu", "rrelu", "prelu", "softplus",
                                "celu", "selu", "gelu", "relu6", "sigmoid", "softsign", "hardtanh",
@@ -64,14 +68,15 @@ dnn <- function(formula,
                 lambda = 0.0,
                 alpha = 0.5,
                 dropout = 0.0,
-                optimizer = c("adam","adadelta", "adagrad", "rmsprop", "rprop", "sgd", "lbfgs"),
+                optimizer = c("sgd","adam","adadelta", "adagrad", "rmsprop", "rprop"),
                 lr = 0.01,
                 batchsize = 32L,
-                shuffle = FALSE,
-                epochs = 32,
+                shuffle = TRUE,
+                epochs = 100,
                 plot = TRUE,
                 verbose = TRUE,
                 lr_scheduler = NULL,
+                custom_parameters = NULL,
                 device = c("cpu","cuda"),
                 early_stopping = FALSE) {
   checkmate::assert(checkmate::checkMatrix(data), checkmate::checkDataFrame(data))
@@ -121,13 +126,24 @@ dnn <- function(formula,
   }
   X <- stats::model.matrix(formula, data)
   Y <- stats::model.response(stats::model.frame(formula, data))
+  ylvls <- NULL
+  if(is.factor(Y)) ylvls <- levels(Y)
   if(!inherits(Y, "matrix")) Y = as.matrix(Y)
 
 
   loss_obj <- get_loss(loss)
+  if(!is.null(loss_obj$parameter)) loss_obj$parameter <- list(scale = loss_obj$parameter)
+  if(!is.null(custom_parameters)){
+    if(!inherits(custom_parameters,"list")){
+      warning("custom_parameters has to be list")
+    }else{
+      custom_parameters<- lapply(custom_parameters,function(x) torch::torch_tensor(x, requires_grad = TRUE, device = device))
+      loss_obj$parameter <- append(loss_obj$parameter,unlist(custom_parameters))
+
+      }
+  }
 
   y_dim <- ncol(Y)
-  x_dtype <- torch::torch_float32()
   y_dtype <- torch::torch_float32()
   if(is.character(Y)) {
     y_dim <- length(unique(as.integer(as.factor(Y[,1]))))
@@ -137,6 +153,7 @@ dnn <- function(formula,
         Y <- torch::as_array(torch::nnf_one_hot(torch::torch_tensor(Y, dtype=torch::torch_long() ))$squeeze())
     }}
   }
+
   if(!is.function(loss_obj$call)){
     if(all(loss_obj$call == "softmax")) y_dtype = torch::torch_long()
   }
@@ -144,11 +161,11 @@ dnn <- function(formula,
   if(validation != 0){
     valid <- sort(sample(c(1:nrow(X)),replace=FALSE,size = round(validation*nrow(X))))
     train <- c(1:nrow(X))[-valid]
-    train_dl <- get_data_loader(X[train,],Y[train,], batch_size = batchsize, shuffle = shuffle, x_dtype=x_dtype, y_dtype=y_dtype)
-    valid_dl <- get_data_loader(X[valid,],Y[valid,], batch_size = batchsize, shuffle = shuffle, x_dtype=x_dtype, y_dtype=y_dtype)
+    train_dl <- get_data_loader(X[train,],Y[train,], batch_size = batchsize, shuffle = shuffle, y_dtype=y_dtype)
+    valid_dl <- get_data_loader(X[valid,],Y[valid,], batch_size = batchsize, shuffle = shuffle, y_dtype=y_dtype)
 
   }else{
-    train_dl <- get_data_loader(X,Y, batch_size = batchsize, shuffle = shuffle, x_dtype=x_dtype, y_dtype=y_dtype)
+    train_dl <- get_data_loader(X,Y, batch_size = batchsize, shuffle = shuffle, y_dtype=y_dtype)
     valid_dl <- NULL
   }
 
@@ -184,8 +201,14 @@ dnn <- function(formula,
   class(out) <- "citodnn"
   out$net <- net
   out$call <- match.call()
+  out$call$formula <- stats::terms.formula(formula,data = data)
   out$loss <- loss_obj
   out$data <- list(X = X, Y = Y, data = data)
+  out$data$xlvls <- lapply(data[,sapply(data, is.factor), drop = F], function(j) levels(j) )
+  if(!is.null(ylvls))  {
+    out$data$ylvls <- ylvls
+    out$data$xlvls <- out$data$xlvls[-which(as.character(formula[2]) == names(out$data$xlvls))]
+  }
   if(validation != 0) out$data <- append(out$data, list(validation = valid))
   out$weights <- list()
   out$use_model_epoch <- 0
@@ -194,10 +217,9 @@ dnn <- function(formula,
   out$training_properties <- training_properties
 
 
+
   ### training loop ###
   out <- train_model(model = out,epochs = epochs, device = device, train_dl = train_dl, valid_dl = valid_dl, verbose = verbose)
-
-
 
 
   return(out)
@@ -218,7 +240,9 @@ print.citodnn <- function(x,...){
   return(invisible(x))
 }
 
-#' Print class citodnn
+#' Extract Model Residuals
+#'
+#' Returns residuals of training set.
 #'
 #' @param object a model created by \code{\link{dnn}}
 #' @param ... no additional arguments implemented
@@ -247,11 +271,11 @@ residuals.citodnn <- function(object,...){
 #' For each feature n permutation get done and original and permuted predictive mean squared error (\eqn{e_{perm}} & \eqn{e_{orig}}) get evaluated with \eqn{ FI_j= e_{perm}/e_{orig}}. Based on Mean Squared Error.
 #'
 #' @param object a model of class citodnn created by \code{\link{dnn}}
-#' @param n_permute number of permutations performed, higher equals more accurate importance results
+#' @param n_permute number of permutations performed. Default is \eqn{3 * \sqrt{n}}, where n euqals then number of samples in the training set
 #' @param ... additional arguments
 #' @return summary.glm returns an object of class "summary.citodnn", a list with components
 #' @export
-summary.citodnn <- function(object, n_permute = 256, ...){
+summary.citodnn <- function(object, n_permute = NULL, ...){
   object <- check_model(object)
   out <- list()
   class(out) <- "summary.citodnn"
@@ -270,6 +294,8 @@ summary.citodnn <- function(object, n_permute = 256, ...){
 #' @export
 print.summary.citodnn <- function(x, ... ){
   cat("Deep Neural Network Model summary\n")
+  cat("Model generated on basis of: \n")
+  #cat(paste(as.character(x$call$formula)[c(2,1,3)],collapse =" ")) # Unncessary, right? Variables names are the column names of the importance matrix
   cat("Feature Importance:\n")
   print(x$importance)
   return(invisible(x))
@@ -293,13 +319,14 @@ coef.citodnn <- function(object,...){
 #'
 #' @param object a model created by \code{\link{dnn}}
 #' @param newdata new data for predictions
-#' @param type link or response
+#' @param type which value should be calculated, either raw response, output of link function or predicted class (in case of classification)
+#' @param device device on which network should be trained on.
 #' @param ... additional arguments
 #' @return prediction matrix
 #'
 #' @example /inst/examples/predict.citodnn-example.R
 #' @export
-predict.citodnn <- function(object, newdata = NULL, type=c("link", "response"),...) {
+predict.citodnn <- function(object, newdata = NULL, type=c("link", "response", "class"),device = c("cpu","cuda"),...) {
 
   checkmate::assert( checkmate::checkNull(newdata),
                      checkmate::checkMatrix(newdata),
@@ -307,23 +334,52 @@ predict.citodnn <- function(object, newdata = NULL, type=c("link", "response"),.
                      checkmate::checkScalarNA(newdata))
   object <- check_model(object)
 
-  type = match.arg(type)
+  type <- match.arg(type)
 
-  if(type == "link") link = object$loss$invlink
-  else link = function(a) a
+  device <- match.arg(device)
 
-  ### TO DO: use dataloaders via get_data_loader function
-  if(is.null(newdata)) newdata = torch::torch_tensor(object$data$X)
-  else {
-    if(is.data.frame(newdata)) {
-      newdata <- stats::model.matrix(stats::as.formula(object$call$formula), newdata)
-    } else {
-      newdata <- stats::model.matrix(stats::as.formula(object$call$formula), data.frame(newdata))
-    }
-    newdata <- torch::torch_tensor(newdata)
+  if(type %in% c("link","class")) {
+    link <- object$loss$invlink
+  }else{
+    link = function(a) a
   }
 
-  pred <- torch::as_array(link(object$net(newdata,...)))
+  if(device == "cuda"){
+    if (torch::cuda_is_available()) {
+      device <- torch::torch_device("cuda")}
+    else{
+      warning("No Cuda device detected, device is set to cpu")
+      device <- torch::torch_device("cpu")
+    }
+
+  }else {
+    if(device != "cpu") warning(paste0("device ",device," not know, device is set to cpu"))
+    device <- torch::torch_device("cpu")
+  }
+
+  object$net$to(device = device)
+
+
+  ### TO DO: use dataloaders via get_data_loader function
+  if(is.null(newdata)){
+    newdata = torch::torch_tensor(object$data$X, device = device)
+  } else {
+    if(is.data.frame(newdata)) {
+      newdata <- stats::model.matrix(stats::as.formula(stats::delete.response(object$call$formula)), newdata,xlev = object$data$xlvls)
+    } else {
+      newdata <- stats::model.matrix(stats::as.formula(stats::delete.response(object$call$formula)), data.frame(newdata),xlev = object$data$xlvls)
+    }
+    newdata <- torch::torch_tensor(newdata, device = device)
+  }
+
+  pred <- torch::as_array(link(object$net(newdata))$to(device="cpu"))
+
+  if(!is.null(object$data$ylvls)) colnames(pred) <- object$data$ylvls
+  if(type == "class") pred <- as.factor(apply(pred,1, function(x) object$data$ylvls[which.max(x)]))
+
+  rownames(pred) <- rownames(newdata)
+
+
   return(pred)
 }
 

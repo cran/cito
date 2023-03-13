@@ -7,7 +7,7 @@
 dnn(
   formula,
   data = NULL,
-  loss = c("mae", "mse", "softmax", "cross-entropy", "gaussian", "binomial", "poisson"),
+  loss = c("mse", "mae", "softmax", "cross-entropy", "gaussian", "binomial", "poisson"),
   hidden = c(10L, 10L, 10L),
   activation = c("relu", "leaky_relu", "tanh", "elu", "rrelu", "prelu", "softplus",
     "celu", "selu", "gelu", "relu6", "sigmoid", "softsign", "hardtanh", "tanhshrink",
@@ -17,14 +17,15 @@ dnn(
   lambda = 0,
   alpha = 0.5,
   dropout = 0,
-  optimizer = c("adam", "adadelta", "adagrad", "rmsprop", "rprop", "sgd", "lbfgs"),
+  optimizer = c("sgd", "adam", "adadelta", "adagrad", "rmsprop", "rprop"),
   lr = 0.01,
   batchsize = 32L,
-  shuffle = FALSE,
-  epochs = 32,
+  shuffle = TRUE,
+  epochs = 100,
   plot = TRUE,
   verbose = TRUE,
   lr_scheduler = NULL,
+  custom_parameters = NULL,
   device = c("cpu", "cuda"),
   early_stopping = FALSE
 )
@@ -66,9 +67,11 @@ dnn(
 
 \item{lr_scheduler}{learning rate scheduler created with \code{\link{config_lr_scheduler}}}
 
+\item{custom_parameters}{List of parameters/variables to be optimized. Can be used in a custom loss function. See Vignette for example.}
+
 \item{device}{device on which network should be trained on.}
 
-\item{early_stopping}{if set to integer, training will stop if validation loss worsened between current defined past epoch.}
+\item{early_stopping}{if set to integer, training will stop if loss has gotten higher for defined number of epochs in a row, will use validation loss is available.}
 }
 \value{
 an S3 object of class \code{"cito.dnn"} is returned. It is a list containing everything there is to know about the model and its training process.
@@ -86,7 +89,7 @@ The list consists of the following attributes:
 }
 \description{
 fits a custom deep neural network. dnn() supports the formula syntax and allows to customize the neural network to a maximal degree.
-So far, only Multilayer Perceptrons are possible. To learn more about Deep Learning, see \href{https://www.nature.com/articles/nature14539}{here}
+So far, only Multilayer Perceptrons are possible.
 }
 \details{
 In a Multilayer Perceptron (MLP) network every neuron is connected with all neurons of the previous layer and connected to all neurons of the layer afterwards.
@@ -96,9 +99,14 @@ The value of each neuron is calculated with:
 
 Where \eqn{w_j} is the weight and \eqn{a_j} is the value from neuron j to the current one. a() is the activation function, e.g. \eqn{ relu(x) = max(0,x)}
 As regularization methods there is dropout and elastic net regularization available. These methods help you avoid over fitting.
+
+Training on graphic cards:
+If you want to train on your cuda devide, you have to install the NVIDIA CUDA toolkit version 11.3. and cuDNN 8.4. beforehand. Make sure that you have exactly these versions installed, since it does not work with other version.
+For more information see \href{https://torch.mlverse.org/docs/articles/installation.html}{mlverse: 'torch'}
 }
 \examples{
 \donttest{
+if(torch::torch_is_installed()){
 library(cito)
 
 set.seed(222)
@@ -127,7 +135,50 @@ PDP(nn.fit, variable = "Petal.Length")
 # Accumulated local effect plots
 ALE(nn.fit, variable = "Petal.Length")
 
+# Custom loss functions and additional parameters
+## Normal Likelihood with sd parameter:
+custom_loss = function(true, pred) {
+  logLik = torch::distr_normal(pred,
+                               scale = torch::nnf_relu(scale)+
+                                 0.001)$log_prob(true)
+  return(-logLik$mean())
+}
 
+nn.fit<- dnn(Sepal.Length~.,
+             data = datasets::iris[-validation_set,],
+             loss = custom_loss,
+             custom_parameters = list(scale = 1.0)
+)
+nn.fit$parameter$scale
+
+## Multivariate normal likelihood with parametrized covariance matrix
+## Sigma = L*L^t + D
+## Helper function to build covariance matrix
+create_cov = function(LU, Diag) {
+  return(torch::torch_matmul(LU, LU$t()) + torch::torch_diag(Diag+0.01))
+}
+
+custom_loss_MVN = function(true, pred) {
+  Sigma = create_cov(SigmaPar, SigmaDiag)
+  logLik = torch::distr_multivariate_normal(pred,
+                                            covariance_matrix = Sigma)$
+    log_prob(true)
+  return(-logLik$mean())
+}
+
+
+nn.fit<- dnn(cbind(Sepal.Length, Sepal.Width, Petal.Length)~.,
+             data = datasets::iris[-validation_set,],
+             lr = 0.01,
+             loss = custom_loss_MVN,
+             custom_parameters =
+               list(SigmaDiag =  rep(1, 3),
+                    SigmaPar = matrix(rnorm(6, sd = 0.001), 3, 2))
+)
+as.matrix(create_cov(nn.fit$loss$parameter$SigmaPar,
+                     nn.fit$loss$parameter$SigmaDiag))
+
+}
 }
 }
 \seealso{

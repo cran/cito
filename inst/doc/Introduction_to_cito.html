@@ -12,9 +12,9 @@
 
 <meta name="author" content="Christian Amesoeder" />
 
-<meta name="date" content="2022-07-19" />
+<meta name="date" content="2023-03-13" />
 
-<title>cito</title>
+<title>Introduction_to_cito</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -122,13 +122,20 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
   for (var i = 0; i < sheets.length; i++) {
     if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
     try { var rules = sheets[i].cssRules; } catch (e) { continue; }
-    for (var j = 0; j < rules.length; j++) {
+    var j = 0;
+    while (j < rules.length) {
       var rule = rules[j];
       // check if there is a div.sourceCode rule
-      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") continue;
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
       var style = rule.style.cssText;
       // check if color or background-color is set
-      if (rule.style.color === '' && rule.style.backgroundColor === '') continue;
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
       // replace div.sourceCode by a pre.sourceCode rule
       sheets[i].deleteRule(j);
       sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
@@ -332,60 +339,58 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 
 
 
-<h1 class="title toc-ignore">cito</h1>
+<h1 class="title toc-ignore">Introduction_to_cito</h1>
 <h4 class="author">Christian Amesoeder</h4>
-<h4 class="date">2022-07-19</h4>
+<h4 class="date">2023-03-13</h4>
 
 
 <div id="TOC">
 <ul>
-<li><a href="#abstract">Abstract</a></li>
-<li><a href="#setup">Setup</a>
+<li><a href="#abstract" id="toc-abstract">Abstract</a></li>
+<li><a href="#setup" id="toc-setup">Setup</a>
 <ul>
-<li><a href="#installing-torch">Installing torch</a></li>
-<li><a href="#data">Data</a></li>
+<li><a href="#installing-torch" id="toc-installing-torch">Installing
+torch</a></li>
+<li><a href="#data" id="toc-data">Data</a></li>
 </ul></li>
-<li><a href="#introduction-to-models-and-model-structures">Introduction
-to models and model structures</a>
+<li><a href="#introduction-to-models-and-model-structures" id="toc-introduction-to-models-and-model-structures">Introduction to
+models and model structures</a>
 <ul>
-<li><a href="#adding-activation-functions">Adding activation
+<li><a href="#adding-activation-functions" id="toc-adding-activation-functions">Adding activation
 functions</a></li>
-<li><a href="#adding-a-validation-set-to-the-training-process">Adding a
+<li><a href="#adding-a-validation-set-to-the-training-process" id="toc-adding-a-validation-set-to-the-training-process">Adding a
 validation set to the training process</a></li>
-<li><a href="#interpreting-model-output">Interpreting model
-output</a></li>
+<li><a href="#interpreting-model-output" id="toc-interpreting-model-output">Interpreting model output</a></li>
 </ul></li>
-<li><a href="#training-parameter-for-the-neural-network">Training
-parameter for the Neural Network</a>
+<li><a href="#training-hyperparameters" id="toc-training-hyperparameters">Training hyperparameters</a>
 <ul>
-<li><a href="#regularization">Regularization</a></li>
-<li><a href="#learning-rate">Learning rate</a></li>
-<li><a href="#learning-rate-scheduler">Learning rate scheduler</a></li>
-<li><a href="#optimizer">Optimizer</a></li>
-<li><a href="#loss-functions">Loss functions</a></li>
-<li><a href="#early-stopping">Early Stopping</a></li>
+<li><a href="#regularization" id="toc-regularization">Regularization</a></li>
+<li><a href="#learning-rate" id="toc-learning-rate">Learning
+rate</a></li>
+<li><a href="#learning-rate-scheduler" id="toc-learning-rate-scheduler">Learning rate scheduler</a></li>
+<li><a href="#optimizer" id="toc-optimizer">Optimizer</a></li>
+<li><a href="#loss-functions" id="toc-loss-functions">Loss
+functions</a></li>
+<li><a href="#early-stopping" id="toc-early-stopping">Early
+Stopping</a></li>
 </ul></li>
-<li><a href="#continue-training-process">Continue training
-process</a></li>
+<li><a href="#continue-training-process" id="toc-continue-training-process">Continue training process</a></li>
 </ul>
 </div>
 
 <div id="abstract" class="section level2">
 <h2>Abstract</h2>
-<p>‘cito’ allows you to build and train Neural Networks with the
-standard R syntax. The whole process of generating and training a deep
-neural network can be done with command. Afterwards all generic R
-methods can be used on the model, which makes comparisons way easier. It
-is based on the ‘torch’ machine learning framework which for R. Since it
-is native to R, no Python installation or API is needed for this
-package.</p>
+<p>With ‘cito’ you can build and train fully-connected neural networks
+using the formula syntax. It is based on the ‘torch’ deep learning
+framework. Since ‘torch’ is native to R, no Python installation or API
+is needed.</p>
 </div>
 <div id="setup" class="section level2">
 <h2>Setup</h2>
 <div id="installing-torch" class="section level3">
 <h3>Installing torch</h3>
-<p>Before using cito for the first time, make sure that the current
-version of ‘torch’ is installed running.</p>
+<p>Before using ‘cito’ make sure that the current version of ‘torch’ is
+installed and running.</p>
 <div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span>(<span class="sc">!</span><span class="fu">require</span>(torch)) <span class="fu">install.packages</span>(<span class="st">&quot;torch&quot;</span>)</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(torch)</span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span>(<span class="sc">!</span><span class="fu">torch_is_installed</span>()) <span class="fu">install_torch</span>()</span>
@@ -394,8 +399,8 @@ version of ‘torch’ is installed running.</p>
 </div>
 <div id="data" class="section level3">
 <h3>Data</h3>
-<p>As an example we will work with the irirs dataset. Which consists of
-three species and four descriptive variables.</p>
+<p>In this vignette, we will work with the irirs dataset and build a
+regression model.</p>
 <div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>data <span class="ot">&lt;-</span> datasets<span class="sc">::</span>iris</span>
 <span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(data)</span>
 <span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="co">#&gt;   Sepal.Length Sepal.Width Petal.Length Petal.Width Species</span></span>
@@ -412,15 +417,13 @@ three species and four descriptive variables.</p>
 </div>
 <div id="introduction-to-models-and-model-structures" class="section level2">
 <h2>Introduction to models and model structures</h2>
-<p>cito allows you to use the formula syntax to build multi layer
-perceptron networks. Here we build a network with 4 Hidden layers, each
-with 10 perceptrons. You do not need to adjust factors or include
-interactions as data columns manually this can be done through the
-formula syntax.</p>
-<p>While this training is done on the cpu, all models can be trained on
-the gpu with device = “cuda”.</p>
+<p>In ‘cito’, you can fit neural networks with the dnn function. Models
+can also be trained on the GPU by setting device = “cuda”. This is
+suggested if you are working with large data sets or networks.</p>
 <div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(cito)</span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>nn.fit <span class="ot">&lt;-</span> <span class="fu">dnn</span>(Sepal.Length<span class="sc">~</span>. , <span class="at">data =</span> data, <span class="at">hidden =</span> <span class="fu">c</span>(<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>), <span class="at">epochs =</span> <span class="dv">12</span>, <span class="at">device =</span> <span class="st">&quot;cpu&quot;</span>)</span></code></pre></div>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="co">#fitting a regression model to predict Sepal.Length</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>nn.fit <span class="ot">&lt;-</span> <span class="fu">dnn</span>(Sepal.Length<span class="sc">~</span>. , <span class="at">data =</span> data, <span class="at">hidden =</span> <span class="fu">c</span>(<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>), <span class="at">epochs =</span> <span class="dv">12</span>, <span class="at">device =</span> <span class="st">&quot;cpu&quot;</span>)</span></code></pre></div>
 <pre><code>#&gt; Loss at epoch 1: 0.906718, lr: 0.01000 
 #&gt; Loss at epoch 2: 0.863654, lr: 0.01000 
 #&gt; Loss at epoch 3: 0.843066, lr: 0.01000 
@@ -430,8 +433,8 @@ the gpu with device = “cuda”.</p>
 #&gt; 
 #&gt; Loss at epoch 11: 0.408130, lr: 0.01000 
 #&gt; Loss at epoch 12: 0.403822, lr: 0.01000</code></pre>
-<p>You can plot the networks structure to give you an overview of the
-created object. Be aware that this may take some time for really big
+<p>You can plot the network structure to give you a visual feedback of
+the created object. Be aware that this may take some time for large
 networks.</p>
 <div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(nn.fit)</span></code></pre></div>
 <div class="figure">
@@ -440,14 +443,14 @@ networks.</p>
 </div>
 <div id="adding-activation-functions" class="section level3">
 <h3>Adding activation functions</h3>
-<p>As standard all layers are fitted with relu as activation layer.
+<p>By default, all layers are fitted with ReLU as activation function.
 <span class="math display">\[
 relu(x) = max (0,x)
-\]</span> However, you can adjust the activation function of each layer
+\]</span> You can also adjust the activation function of each layer
 individually to build exactly the network you want. In this case you
 have to provide a vector the same length as there are hidden layers. The
-activation function for the output layer (also called “link” function)
-is chosen automatically and does not have to be provided.</p>
+activation function of the output layer is chosen with the loss argument
+and does not have to be provided.</p>
 <div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co">#selu as activation function for all layers: </span></span>
 <span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>nn.fit <span class="ot">&lt;-</span> <span class="fu">dnn</span>(Sepal.Length<span class="sc">~</span>., <span class="at">data =</span> data, <span class="at">hidden =</span> <span class="fu">c</span>(<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>), <span class="at">activation=</span> <span class="st">&quot;selu&quot;</span>)</span>
 <span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="co">#layer specific activation functions: </span></span>
@@ -457,9 +460,10 @@ is chosen automatically and does not have to be provided.</p>
 <div id="adding-a-validation-set-to-the-training-process" class="section level3">
 <h3>Adding a validation set to the training process</h3>
 <p>In order to see where your model might start overfitting the addition
-of a validation set can be useful. In dnn() you can put activation = 0.x
-and the defined percentage will be not used for training and only for
-validation after each epoch.</p>
+of a validation set can be useful. With dnn() you can put validation =
+0.x and define a percentage that will not be used for training and only
+for validation after each epoch. During training, the loss plot will
+show you how the two losses behave.</p>
 <div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co">#20% of data set is used as validation set</span></span>
 <span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>nn.fit <span class="ot">&lt;-</span> <span class="fu">dnn</span>(Sepal.Length<span class="sc">~</span>., <span class="at">data =</span> data, <span class="at">epochs =</span> <span class="dv">32</span>,</span>
 <span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>              <span class="at">loss=</span> <span class="st">&quot;mae&quot;</span>, <span class="at">hidden =</span> <span class="fu">c</span>(<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>), <span class="at">validation =</span> <span class="fl">0.2</span>)</span></code></pre></div>
@@ -477,15 +481,14 @@ validation after each epoch.</p>
 <img src="data:image/png;base64,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" style="width:70.0%" alt />
 <p class="caption">Training loss</p>
 </div>
-<p>The validation loss allows us to choose the model which has the
-minimum validation loss as out optimal one. By setting
-nn.fit$use_model_epoch to the model with the least validation loss, from
-now on always this model will be used for all following functions</p>
+<p>We can choose the model with minimal validation loss with the
+nn.fit$use_model_epoch argument.</p>
 <div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>nn.fit<span class="sc">$</span>use_model_epoch <span class="ot">&lt;-</span> <span class="fu">which.min</span>(nn.fit<span class="sc">$</span>losses<span class="sc">$</span>valid_l)</span></code></pre></div>
 </div>
 <div id="interpreting-model-output" class="section level3">
 <h3>Interpreting model output</h3>
-<p>The standard S3 functions can be used to interpret the model:</p>
+<p>The standard generic functions can be used to interpret the
+model:</p>
 <div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co">#utilize model on new data </span></span>
 <span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="fu">predict</span>(nn.fit,data[<span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>,])</span></code></pre></div>
 <pre><code>#&gt;          [,1]
@@ -512,8 +515,8 @@ now on always this model will be used for all following functions</p>
 #&gt;  
 #&gt; [[1]]$`8.bias` 
 #&gt; [1] 0.2862495</code></pre>
-<p>Feature Importance based on <a href="https://arxiv.org/abs/1801.01489">Fisher, Rudin, and Dominici
-(2018)</a></p>
+<p>With summary(), the feature Importance based on <a href="https://arxiv.org/abs/1801.01489">Fisher, Rudin, and Dominici
+(2018)</a> gets calculated for all variables.</p>
 <div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Calculate and return feature importance</span></span>
 <span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="fu">summary</span>(nn.fit)</span></code></pre></div>
 <pre><code>#&gt; Deep Neural Network Model summary
@@ -525,30 +528,23 @@ now on always this model will be used for all following functions</p>
 #&gt; 4      Species   3.278064</code></pre>
 </div>
 </div>
-<div id="training-parameter-for-the-neural-network" class="section level2">
-<h2>Training parameter for the Neural Network</h2>
-<p>Training a neural network can be an art of itself. Fitting a neural
-network usually takes some trial and error.</p>
+<div id="training-hyperparameters" class="section level2">
+<h2>Training hyperparameters</h2>
 <div id="regularization" class="section level3">
 <h3>Regularization</h3>
-<p>Neural Networks tend to overfit to your dataset. Therefore it is best
-to use some kind of regularization. In dnn() you can use elastic net
-regularization and dropout layers.</p>
-<div id="l1l2-regularization" class="section level4">
-<h4>L1/L2 Regularization</h4>
-<p>The L1/L2 loss is controlled by alpha and lambda, where the loss is
-simply added to the general loss of the network.</p>
+<div id="elastic-net-regularization" class="section level4">
+<h4>Elastic net regularization</h4>
+<p>If elastic net is used, ‘cito’ will produce a sparse, generalized
+neural network. The L1/L2 loss can be controlled with the arguments
+alpha and lambda.</p>
 <p><span class="math display">\[
-L1/L2 loss = \lambda * [ (1 - \alpha) * |weights| + \alpha |weights|^2 ]
+loss = \lambda * [ (1 - \alpha) * |weights| + \alpha |weights|^2 ]
 \]</span></p>
-<p>The optimizer will try to also minimize the equation above which can
-lead to a nice generalization and avoids over fitting.</p>
-<p>If a single alpha value is provided each layer w ill get regularized
-the same. However, you can regularize each layer individually by
-providing a vector of alpha values the same length as there are hidden
-layers + 1, since the input layer also has weights that are relevant.
-Since FALSE gets converted to 0 in an numeric vector you have to enter
-NA if no penalty should be added on a specific layer.</p>
+<p>If a single alpha value is provided each layer will get regularized
+the same. You can also regularize each layer individually by providing a
+vector of alpha values the same length as there are hidden layers + 1,
+the +1 comes from the input layer. With NA you can turn off
+generalization for specific layers.</p>
 <div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="co">#elastic net penalty in all layers: </span></span>
 <span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>nn.fit <span class="ot">&lt;-</span> <span class="fu">dnn</span>(Species<span class="sc">~</span>., <span class="at">data =</span> data, <span class="at">hidden =</span> <span class="fu">c</span>(<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>), <span class="at">alpha =</span> <span class="fl">0.5</span>, <span class="at">lambda =</span> <span class="fl">0.01</span>)</span>
 <span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="co">#L1 generalization in the first layer no penalty on the other layers: </span></span>
@@ -557,9 +553,8 @@ NA if no penalty should be added on a specific layer.</p>
 </div>
 <div id="dropout-regularization" class="section level4">
 <h4>Dropout Regularization</h4>
-<p>Dropouts are another way to regularize your model. During training in
-every epoch a perceptrons has a chance to get left out. You can control
-this percentage with the dropout parameter.</p>
+<p>Dropout also regularizes your network. During training in every epoch
+a defined percentage of nodes gets left out.</p>
 <div class="sourceCode" id="cb17"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="co">#dropout of 35% on all layers: </span></span>
 <span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>nn.fit <span class="ot">&lt;-</span> <span class="fu">dnn</span>(Species<span class="sc">~</span>., <span class="at">data =</span> data, <span class="at">hidden =</span> <span class="fu">c</span>(<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>,<span class="dv">10</span>), <span class="at">dropout =</span> <span class="fl">0.35</span>)</span>
 <span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a><span class="co">#dropout of 35% only on last 2 layers: </span></span>
@@ -569,16 +564,11 @@ this percentage with the dropout parameter.</p>
 </div>
 <div id="learning-rate" class="section level3">
 <h3>Learning rate</h3>
-<p>The lr parameter controls the so called learning rate. This parameter
-defines the step size the optimizer takes during training at each epoch.
-If set too high the optimizer might not find a good optimum because you
-shoot across certain valleys. If set too low the training process takes
-too long to be viable.</p>
 </div>
 <div id="learning-rate-scheduler" class="section level3">
 <h3>Learning rate scheduler</h3>
-<p>Learning rate scheduler are allow you to start with a high learning
-rate and decrease it during the training process. You can choose between
+<p>Learning rate scheduler allow you to start with a high learning rate
+and decrease it during the training process. You can choose between
 different types of schedulers. Namely, lambda, multiplicative, one_cycle
 and step.</p>
 <p>The function config_lr_scheduler() helps you setup such a scheduler.
@@ -592,14 +582,13 @@ See ?config_lr_scheduler() for more information</p>
 </div>
 <div id="optimizer" class="section level3">
 <h3>Optimizer</h3>
-<p>Optimizer are responsible for calculating the direction when updating
-weights in the training process. The optimizer always tries to minimize
-the loss function. As standard the adam optimizer will be used.</p>
-<p>However, you can customize your optimizer with config_optimizer() and
-use other types of optimizer and adjust the hyperparameter of you
-optimizer. See ?config_optimizer() for more information.</p>
+<p>Optimizer are responsible for fitting the neural network. The
+optimizer tries to minimize the loss function. As default the stochastic
+gradient descent is used. Custom optimizers can be used with
+config_optimizer().<br />
+See ?config_optimizer() for more information.</p>
 <div class="sourceCode" id="cb19"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="co"># adam optimizer with learning rate 0.002 with slightly changed betas to 0.95, 0.999 and eps to 1.5e-08</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="co"># adam optimizer with learning rate 0.002, betas to 0.95, 0.999 and eps to 1.5e-08</span></span>
 <span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>opt <span class="ot">&lt;-</span> <span class="fu">config_optimizer</span>(</span>
 <span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">type =</span> <span class="st">&quot;adam&quot;</span>, </span>
 <span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">betas =</span> <span class="fu">c</span>(<span class="fl">0.95</span>, <span class="fl">0.999</span>), </span>
@@ -609,14 +598,12 @@ optimizer. See ?config_optimizer() for more information.</p>
 </div>
 <div id="loss-functions" class="section level3">
 <h3>Loss functions</h3>
-<p>Loss function evaluate the current residuals and measure how good the
-network performs. Of course the standard Loss functions like mean
-absolute error, real mean squared error and cross-entropy are
-implemented , you can also fit to certain probability distributions.</p>
+<p>Loss function measure how good the network performs. Standard Loss
+functions are implemented along with some probability distributions.</p>
 <div class="sourceCode" id="cb20"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Real Mean squared error</span></span>
 <span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>nn.fit <span class="ot">&lt;-</span> <span class="fu">dnn</span>(Sepal.Length<span class="sc">~</span>. <span class="at">data =</span> data, <span class="at">loss =</span> <span class="st">&quot;rmse&quot;</span>) </span>
 <span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Fit to a normal distribution, you can also define the parameters of the distribution</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a><span class="co"># normal distribution </span></span>
 <span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>nn.fit <span class="ot">&lt;-</span> <span class="fu">dnn</span>(Sepal.Length<span class="sc">~</span>. <span class="at">data =</span> data, <span class="at">loss =</span> stats<span class="sc">::</span><span class="fu">gaussian</span>()) </span></code></pre></div>
 </div>
 <div id="early-stopping" class="section level3">
@@ -633,16 +620,15 @@ the early_stopping argument. It is required to set validation &gt;
 </div>
 <div id="continue-training-process" class="section level2">
 <h2>Continue training process</h2>
-<p>In case you want to continue the training process of an existing
-model you need to use continue_training(). This function allows you to
-continue the training process where dnn() stopped.</p>
+<p>You can continue the training process of an existing model with
+continue_training().</p>
 <div class="sourceCode" id="cb22"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="co"># simple example, simply adding another 12 epochs to the training process   </span></span>
 <span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>nn.fit <span class="ot">&lt;-</span> <span class="fu">continue_training</span>(nn.fit, <span class="at">epochs =</span> <span class="dv">12</span>)</span></code></pre></div>
 <p>It also allows you to change any training parameters, for example the
-learning rate. Additional, you can define which epoch the training
-should continue from. So you can analyze the training process with
-analyze_training() and afterwards pick an epoch from which on the
-training should be continued from with other training parameters.</p>
+learning rate. You can also define which epoch the training should
+continue from. You can analyze the training process with
+analyze_training() and pick an epoch from which on the training should
+be continued from.</p>
 <div class="sourceCode" id="cb23"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a><span class="co"># picking the model with the smalles validation loss </span></span>
 <span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a><span class="co"># with changed parameters, in this case a smaller learning rate and a smaller batchsize</span></span>

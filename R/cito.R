@@ -1,13 +1,13 @@
-#' cito: A package for training neural networks
+#' 'cito': Building and training neural networks
 #'
-#' cito is based on the torch Machine Learning framework and allows to train a deep neural network with one line and also analyze it afterwards.
+#' Building and training custom neural networks in the typical R syntax. The 'torch' package is used for numerical calculations, which allows for training on CPU as well as on a graphics card.
 #' The main function is \code{\link{dnn}} which trains a custom deep neural network.
 #'
 #' @section Installation:
 #'
 #' in order to install cito please follow these steps:
 #'
-#' \code{install.packges("cito")}
+#' \code{install.packages("cito")}
 #'
 #' \code{library(torch)}
 #'
@@ -22,7 +22,8 @@
 #' - \code{\link{ALE}}: plot the accumulated local effect plot for a specific feature
 #'
 #' @examples
-#' vignette("cito", package="cito")
+#'
+#' vignette("Introduction_to_cito", "cito")
 #'
 #' @docType package
 #' @name cito

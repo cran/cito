@@ -21,6 +21,8 @@ data <- data.frame(scale(data[,-5]),Species = data[,5])
 
 ## ----simp_models, fig.show='hide',out.lines = 3,eval= FALSE-------------------
 #  library(cito)
+#  
+#  #fitting a regression model to predict Sepal.Length
 #  nn.fit <- dnn(Sepal.Length~. , data = data, hidden = c(10,10,10,10), epochs = 12, device = "cpu")
 #  
 #  
@@ -140,7 +142,7 @@ Feature Importance:
 
 ## ----optim,eval = FALSE-------------------------------------------------------
 #  
-#  # adam optimizer with learning rate 0.002 with slightly changed betas to 0.95, 0.999 and eps to 1.5e-08
+#  # adam optimizer with learning rate 0.002, betas to 0.95, 0.999 and eps to 1.5e-08
 #  opt <- config_optimizer(
 #    type = "adam",
 #    betas = c(0.95, 0.999),
@@ -152,7 +154,7 @@ Feature Importance:
 #  # Real Mean squared error
 #  nn.fit <- dnn(Sepal.Length~. data = data, loss = "rmse")
 #  
-#  # Fit to a normal distribution, you can also define the parameters of the distribution
+#  # normal distribution
 #  nn.fit <- dnn(Sepal.Length~. data = data, loss = stats::gaussian())
 
 ## ----early_stopping,eval = FALSE----------------------------------------------

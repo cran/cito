@@ -4,14 +4,22 @@
 \alias{predict.citodnn}
 \title{Predict from a fitted dnn model}
 \usage{
-\method{predict}{citodnn}(object, newdata = NULL, type = c("link", "response"), ...)
+\method{predict}{citodnn}(
+  object,
+  newdata = NULL,
+  type = c("link", "response", "class"),
+  device = c("cpu", "cuda"),
+  ...
+)
 }
 \arguments{
 \item{object}{a model created by \code{\link{dnn}}}
 
 \item{newdata}{new data for predictions}
 
-\item{type}{link or response}
+\item{type}{which value should be calculated, either raw response, output of link function or predicted class (in case of classification)}
+
+\item{device}{device on which network should be trained on.}
 
 \item{...}{additional arguments}
 }
@@ -23,6 +31,7 @@ Predict from a fitted dnn model
 }
 \examples{
 \donttest{
+if(torch::torch_is_installed()){
 library(cito)
 
 set.seed(222)
@@ -37,5 +46,6 @@ predictions <- predict(nn.fit, iris[validation_set,])
 plot(iris[validation_set,]$Sepal.Length,predictions)
 # MAE
 mean(abs(predictions-iris[validation_set,]$Sepal.Length))
+}
 }
 }

@@ -24,17 +24,18 @@
 #' @param data specify new data PDP should be performed . If NULL, PDP is performed on the training data.
 #' @param ice Individual Conditional Dependence will be shown if TRUE
 #' @param resolution.ice resolution in which ice will be computed
+#' @param plot plot ALE or not
 #' @return A list of plots made with 'ggplot2' consisting of an individual plot for each defined variable.
 #' @seealso \code{\link{ALE}}
 #' @example /inst/examples/PDP-example.R
-#'
 #' @export
 
 PDP <- function(model,
                 variable = NULL,
                 data = NULL,
                 ice = FALSE,
-                resolution.ice = 20){
+                resolution.ice = 20,
+                plot=TRUE){
 
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     stop(
@@ -61,20 +62,31 @@ PDP <- function(model,
   perm_data <- stats::model.matrix(model$training_properties$formula, data)
 
   link <- model$loss$invlink
-  p_ret <- lapply (variable,function(v){
+
+
+  p_ret <- sapply (variable,function(v){
+
+    results =
+      lapply(1:model$model_properties$output, function(n_output) {
     if(is.numeric(data[,v])){
       df <- data.frame(
         x = data[,v],
         y = sapply(seq_len(nrow(data)),function(i){
           perm_data[,v]<- perm_data[i,v]
-          return(as.numeric(mean(link(model$net(torch::torch_tensor(perm_data))))))
+          return(as.numeric(mean(link(model$net(torch::torch_tensor(perm_data))   )[,n_output,drop=FALSE] ))  )
         })
       )
       df <- df[order(df$x),]
 
+      if(!is.null(model$data$ylvls)) {
+        label = paste0("PDP - ", model$data$ylvls[n_output])
+      } else {
+        label = "PDP"
+      }
+
       p <- ggplot2::ggplot(data=df, mapping = ggplot2::aes(x=x,y=y ))
       p <- p + ggplot2::geom_line()
-      p <- p + ggplot2::ggtitle(label = "Partial Dependency Plot")
+      p <- p + ggplot2::ggtitle(label = label)
       p <- p + ggplot2::xlab(label = v)
       p <- p + ggplot2::ylab(label = as.character(model$call$formula[2]))
       p <- p + ggplot2::geom_rug(sides = "b")
@@ -85,18 +97,21 @@ PDP <- function(model,
         instances <- seq(from = min(perm_dat[,v]),
                          to = max(perm_dat[,v]),
                          length.out = resolution.ice + 1)
+        #instances = sample(unique(perm_dat[,v]), resolution.ice)
 
-        df_ice <- sapply(seq_len(length(instances)), function(i){
+        df_ice <- lapply(seq_len(length(instances)), function(i){
           perm_dat<-stats::model.matrix(model$training_properties$formula, data)
           perm_dat[,v] <- instances[i]
-          return(as.numeric(link(model$net(torch::torch_tensor(perm_dat)))))
+          return(cbind(instances[i] ,as.numeric(link(model$net(torch::torch_tensor(perm_dat)))[,n_output,drop=FALSE] ), 1:nrow(perm_dat) ))
         })
 
-        df_ice<- data.frame( x = instances,
-                         y = c(t(as.numeric(df_ice))))
+        df_ice<- do.call(rbind, df_ice)
+        colnames(df_ice) = c("x", "y", "group")
+        df_ice = as.data.frame(df_ice)
+        df_ice$group = as.factor(df_ice$group)
 
-        p <- p + ggplot2::geom_line(data = df_ice, mapping = ggplot2::aes(x = x, y = y, group = rep(1:nrow(data), each= resolution.ice + 1)))
-        p <- p + ggplot2::geom_line(colour = "yellow", size = 2, data=df, mapping = ggplot2::aes(x=x,y=y))
+        p <- p + ggplot2::geom_line(data = df_ice, mapping = ggplot2::aes_string(x = "x", y = "y", group = "group" ))
+        p <- p + ggplot2::geom_line(colour = "yellow", linewidth = 2, data=df, mapping = ggplot2::aes(x=x,y=y))
         }
     }else if (is.factor(data[,v])){
       perm_data<- data
@@ -108,7 +123,7 @@ PDP <- function(model,
           for(j in seq_len(nrow(perm_data))){
             perm_data[j,v] <- i
           }
-          return(stats::predict(model,perm_data))
+          return(stats::predict(model,perm_data)[,n_output,drop=FALSE])
         }))
       )
       df$x<- as.factor(df$x)
@@ -117,21 +132,38 @@ PDP <- function(model,
                         return(mean(df$y[which(df$x==i)]))
                       }))
 
-      if(ice) warning("ice not available for categorical features")
+      if(ice) message("ice not available for categorical features")
+
+      if(!is.null(model$data$ylvls)) {
+        label = paste0("PDP - ", model$data$ylvls[n_output])
+      } else {
+        label = "PDP"
+      }
+
       p <- ggplot2::ggplot(data = df,mapping = ggplot2::aes(x = x,y = y),)
       p <- p + ggplot2::geom_bar(stat= "identity")
       p <- p + ggplot2::theme_minimal()
       p <- p + ggplot2::geom_text(ggplot2::aes(label=y), vjust=1.6)
-      p <- p + ggplot2::ggtitle(label = "Partial Dependency Plot")
+      p <- p + ggplot2::ggtitle(label = label)
       p <- p + ggplot2::xlab(label = v)
       p <- p + ggplot2::ylab(label = as.character(model$call$formula[2]))
-
       p <- p + ggplot2::xlab(v) + ggplot2::ylab(model$call$formula[2])
+      p <- p + ggplot2::theme_bw()
     }
     return(p)
   })
+    results[sapply(results, is.null)] = NULL
+    return(results)
+  })
 
-  names(p_ret)<- variable
-  return(p_ret)
+  p_ret = do.call(list, p_ret)
+  if(plot) {
+    if(model$model_properties$output >1) do.call(gridExtra::grid.arrange, c(p_ret, nrow = ceiling(length(p_ret)/model$model_properties$output)))
+    else do.call(gridExtra::grid.arrange, c(p_ret, ncol = length(p_ret)))
+  }
+  if(!is.null(model$data$ylvls)) {
+    names(p_ret) = paste0(model$data$ylvls, "_",names(p_ret))
+  }
+  return(invisible(p_ret))
 }
 

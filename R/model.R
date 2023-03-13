@@ -1,24 +1,14 @@
-get_data_loader = function(X, Y, batch_size=25L, shuffle=TRUE, x_dtype, y_dtype) {
-  self <- NULL
-  torch.dataset <- torch::dataset(
-    name = "dataset",
-    initialize = function(X,Y) {
-      self$X <- torch::torch_tensor(as.matrix(X), dtype = x_dtype)
-      self$Y <- torch::torch_tensor(as.matrix(Y), dtype = y_dtype)
-    },
-    .getitem = function(index) {
-      x <- self$X[index,]
-      y <- self$Y[index,]
-      list(x, y)
-    },
-    .length = function() {
-      self$Y$size()[[1]]
-    }
-  )
-  ds <- torch.dataset(X,Y)
-  dl <- torch::dataloader(ds, batch_size = batch_size, shuffle = shuffle)
+get_data_loader = function(X, Y, batch_size=25L, shuffle=TRUE,y_dtype) {
+
+  ds <- torch::tensor_dataset(X =torch::torch_tensor(as.matrix(X)),
+                              Y = torch::torch_tensor(as.matrix(Y),dtype = y_dtype))
+
+  dl <- torch::dataloader(ds, batch_size = batch_size, shuffle = shuffle, pin_memory = TRUE)
+
+
   return(dl)
 }
+
 
 
 
@@ -98,7 +88,7 @@ get_loss <- function(loss) {
       out$parameter <- torch::torch_tensor(0.1, requires_grad = TRUE)
       out$invlink <- function(a) a
       out$loss <- function(pred, true) {
-        return(torch::distr_normal(pred, torch::torch_clamp(out$parameter, 0.0001, 20))$log_prob(true)$negative())
+        return(torch::distr_normal(pred, torch::torch_clamp(torch::torch_tensor(unlist(out$parameter),requires_grad = TRUE), 0.0001, 20))$log_prob(true)$negative())
       }
     } else if(loss$family == "binomial") {
       if(loss$link == "logit") {
@@ -109,7 +99,7 @@ get_loss <- function(loss) {
         out$invlink <- function(a) a
       }
       out$loss <- function(pred, true) {
-        return(torch::distr_bernoulli( out$invlink(pred))$log_prob(true)$negative())
+        return(torch::distr_bernoulli(probs = out$invlink(pred))$log_prob(true)$negative())
       }
     } else if(loss$family == "poisson") {
       if(loss$link == "log") {
