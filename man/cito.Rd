@@ -3,10 +3,13 @@
 \docType{package}
 \name{cito}
 \alias{cito}
+\alias{cito-package}
 \title{'cito': Building and training neural networks}
 \description{
-Building and training custom neural networks in the typical R syntax. The 'torch' package is used for numerical calculations, which allows for training on CPU as well as on a graphics card.
-The main function is \code{\link{dnn}} which trains a custom deep neural network.
+'cito' simplifies the building and training of (deep) neural networks by relying on standard R syntax and familiar methods from statistical packages. Model creation and training can be done with a single line of code. Furthermore, all generic R methods such as print or plot can be used on the fitted model. At the same time, 'cito' is computationally efficient because it is based on the deep learning framework 'torch' (with optional GPU support). The 'torch' package is native to R, so no Python installation or other API is required for this package.
+}
+\details{
+Cito is built around its main function \code{\link{dnn}}, which creates and trains a deep neural network. Various tools for analyzing the trained neural network are available.
 }
 \section{Installation}{
 
@@ -22,18 +25,136 @@ in order to install cito please follow these steps:
 \code{library(cito)}
 }
 
-\section{cito functions}{
+\section{cito functions and typical workflow}{
 
 \itemize{
 \item \code{\link{dnn}}: train deep neural network
+\item \code{\link{analyze_training}}: check for convergence by comparing training loss with baseline loss
 \item \code{\link{continue_training}}: continues training of an existing cito dnn model for additional epochs
+\item \code{\link{summary.citodnn}}: extract xAI metrics/effects to understand how predictions are made
 \item \code{\link{PDP}}: plot the partial dependency plot for a specific feature
 \item \code{\link{ALE}}: plot the accumulated local effect plot for a specific feature
 }
+
+Check out the vignettes for more details on training NN and how a typical workflow with 'cito' could look like.
 }
 
 \examples{
+\donttest{
+if(torch::torch_is_installed()){
+library(cito)
 
-vignette("Introduction_to_cito", "cito")
+# Example workflow in cito
 
+## Build and train  Network
+### softmax is used for multi-class responses (e.g., Species)
+nn.fit<- dnn(Species~., data = datasets::iris, loss = "softmax")
+
+## The training loss is below the baseline loss but at the end of the
+## training the loss was still decreasing, so continue training for another 50
+## epochs
+nn.fit <- continue_training(nn.fit, epochs = 50L)
+
+# Sturcture of Neural Network
+print(nn.fit)
+
+# Plot Neural Network
+plot(nn.fit)
+## 4 Input nodes (first layer) because of 4 features
+## 3 Output nodes (last layer) because of 3 response species (one node for each
+## level in the response variable).
+## The layers between the input and output layer are called hidden layers (two
+## of them)
+
+## We now want to understand how the predictions are made, what are the
+## important features? The summary function automatically calculates feature
+## importance (the interpretation is similar to an anova) and calculates
+## average conditional effects that are similar to linear effects:
+summary(nn.fit)
+
+## To visualize the effect (response-feature effect), we can use the ALE and
+## PDP functions
+
+# Partial dependencies
+PDP(nn.fit, variable = "Petal.Length")
+
+# Accumulated local effect plots
+ALE(nn.fit, variable = "Petal.Length")
+
+
+
+# Per se, it is difficult to get confidence intervals for our xAI metrics (or
+# for the predictions). But we can use bootstrapping to obtain uncertainties
+# for all cito outputs:
+## Re-fit the neural network with bootstrapping
+nn.fit<- dnn(Species~.,
+             data = datasets::iris,
+             loss = "softmax",
+             epochs = 150L,
+             verbose = FALSE,
+             bootstrap = 20L)
+## convergence can be tested via the analyze_training function
+analyze_training(nn.fit)
+
+## Summary for xAI metrics (can take some time):
+summary(nn.fit)
+## Now with standard errors and p-values
+## Note: Take the p-values with a grain of salt! We do not know yet if they are
+## correct (e.g. if you use regularization, they are likely conservative == too
+## large)
+
+## Predictions with bootstrapping:
+dim(predict(nn.fit))
+## The first dim corresponds to the bootstrapping, if you want the average
+## predictions, you need to calculate the mean by your own:
+apply(predict(nn.fit), 2:3, mean)
+
+
+# Advanced: Custom loss functions and additional parameters
+## Normal Likelihood with sd parameter:
+custom_loss = function(true, pred) {
+  logLik = torch::distr_normal(pred,
+                               scale = torch::nnf_relu(scale)+
+                                 0.001)$log_prob(true)
+  return(-logLik$mean())
+}
+
+nn.fit<- dnn(Sepal.Length~.,
+             data = datasets::iris,
+             loss = custom_loss,
+             verbose = FALSE,
+             custom_parameters = list(scale = 1.0)
+)
+nn.fit$parameter$scale
+
+## Multivariate normal likelihood with parametrized covariance matrix
+## Sigma = L*L^t + D
+## Helper function to build covariance matrix
+create_cov = function(LU, Diag) {
+  return(torch::torch_matmul(LU, LU$t()) + torch::torch_diag(Diag+0.01))
+}
+
+custom_loss_MVN = function(true, pred) {
+  Sigma = create_cov(SigmaPar, SigmaDiag)
+  logLik = torch::distr_multivariate_normal(pred,
+                                            covariance_matrix = Sigma)$
+    log_prob(true)
+  return(-logLik$mean())
+}
+
+
+nn.fit<- dnn(cbind(Sepal.Length, Sepal.Width, Petal.Length)~.,
+             data = datasets::iris,
+             lr = 0.01,
+             verbose = FALSE,
+             loss = custom_loss_MVN,
+             custom_parameters =
+               list(SigmaDiag =  rep(1, 3),
+                    SigmaPar = matrix(rnorm(6, sd = 0.001), 3, 2))
+)
+as.matrix(create_cov(nn.fit$loss$parameter$SigmaPar,
+                     nn.fit$loss$parameter$SigmaDiag))
+
+}
+}
 }
