@@ -4,17 +4,20 @@
 #'
 #' @param formula an object of class "\code{\link[stats]{formula}}": a description of the model that should be fitted
 #' @param data matrix or data.frame with features/predictors and response variable
-#' @param loss loss after which network should be optimized. Can also be distribution from the stats package or own function, see details
 #' @param hidden hidden units in layers, length of hidden corresponds to number of layers
 #' @param activation activation functions, can be of length one, or a vector of different activation functions for each layer
-#' @param validation percentage of data set that should be taken as validation set (chosen randomly)
 #' @param bias whether use biases in the layers, can be of length one, or a vector (number of hidden layers + 1 (last layer)) of logicals for each layer.
-#' @param alpha add L1/L2 regularization to training  \eqn{(1 - \alpha) * |weights| + \alpha ||weights||^2} will get added for each layer. Can be single integer between 0 and 1 or vector of alpha values if layers should be regularized differently.
-#' @param lambda strength of regularization: lambda penalty, \eqn{\lambda * (L1 + L2)} (see alpha)
+#'
 #' @param dropout dropout rate, probability of a node getting left out during training (see \code{\link[torch]{nn_dropout}})
+#' @param loss loss after which network should be optimized. Can also be distribution from the stats package or own function, see details
+#' @param validation percentage of data set that should be taken as validation set (chosen randomly)
+#' @param alpha add L1/L2 regularization to training  \eqn{(1 - \alpha) * |weights| + \alpha ||weights||^2} will get added for each layer. Must be between 0 and 1
+#' @param lambda strength of regularization: lambda penalty, \eqn{\lambda * (L1 + L2)} (see alpha)
 #' @param optimizer which optimizer used for training the network, for more adjustments to optimizer see \code{\link{config_optimizer}}
 #' @param lr learning rate given to optimizer
-#' @param batchsize number of samples that are used to calculate one learning rate step
+#' @param batchsize number of samples that are used to calculate one learning rate step, default is 10% of the training data
+#' @param burnin training is aborted if the trainings loss is not below the baseline loss after burnin epochs
+#' @param baseloss baseloss, if null baseloss corresponds to intercept only models
 #' @param shuffle if TRUE, data in each batch gets reshuffled every epoch
 #' @param epochs epochs the training goes on for
 #' @param bootstrap bootstrap neural network or not, numeric corresponds to number of bootstrap samples
@@ -25,8 +28,15 @@
 #' @param custom_parameters List of parameters/variables to be optimized. Can be used in a custom loss function. See Vignette for example.
 #' @param device device on which network should be trained on. mps correspond to M1/M2 GPU devices.
 #' @param early_stopping if set to integer, training will stop if loss has gotten higher for defined number of epochs in a row, will use validation loss is available.
+#' @param tuning tuning options created with \code{\link{config_tuning}}
+#' @param X Feature matrix or data.frame, alternative data interface
+#' @param Y Response vector, factor, matrix or data.frame, alternative data interface
 #'
 #' @details
+#'
+#' # Activation functions
+#'
+#' Supported activation functions:  "relu", "leaky_relu", "tanh", "elu", "rrelu", "prelu", "softplus", "celu", "selu", "gelu", "relu6", "sigmoid", "softsign", "hardtanh", "tanhshrink", "softshrink", "hardshrink", "log_sigmoid"
 #'
 #' # Loss functions / Likelihoods
 #'
@@ -41,6 +51,8 @@
 #' | gaussian | Normal likelihood | Regression, residual error is also estimated (similar to `stats::lm()`)	|
 #' | binomial | Binomial likelihood | Classification/Logistic regression, mortality|
 #' | poisson | Poisson likelihood |Regression, count data, e.g. species abundances|
+#' | nbinom | Negative binomial likelihood | Regression, count data with dispersion parameter |
+#' | mvp | multivariate probit model | joint species distribution model, multi species (presence absence) |
 #'
 #' # Training and convergence of neural networks
 #'
@@ -96,6 +108,32 @@
 #'
 #' Similarly, the \code{\link{config_optimizer}} function enables you to specify the optimizer for your network. Different optimizers, such as stochastic gradient descent (SGD), Adam, or RMSprop, offer various strategies for updating the network's weights and biases during training. Choosing the right optimizer can significantly impact the training process and the final performance of your neural network.
 #'
+#'
+#' # Hyperparameter tuning
+#'
+#' We have implemented experimental support for hyperparameter tuning. We can mark hyperparameters that should be tuned by cito by setting their values to `tune()`, for example `dnn (..., lr = tune()`. [tune()] is a function that creates a range of random values for the given hyperparameter. You can change the maximum and minimum range of the potential hyperparameters or pass custom values to the `tune(values = c(....))` function. The following table lists the hyperparameters that can currently be tuned:
+#'
+#'   | Hyperparameter| Example| Details |
+#'   | :--- | :--- | :--- |
+#'   | hidden | `dnn(…,hidden=tune(10, 20, fixed=’depth’))` |Depth and width can be both tuned or only one of them, if both of them should be tuned, vectors for lower and upper #' boundaries must be provided (first = number of nodes)|
+#'   | bias | `dnn(…, bias=tune())` | Should the bias be turned on or off for all hidden layers |
+#'   | lambda | `dnn(…, lambda = tune(0.0001, 0.1))` |lambda will be tuned within the range (0.0001, 0.1)|
+#'   | alpha | `dnn(…, lambda = tune(0.2, 0.4))` |alpha will be tuned within the range (0.2, 0.4)|
+#'   | activation | `dnn(…, activation = tune())`  |	activation functions of the hidden layers will be tuned|
+#'   | dropout | `dnn(…, dropout = tune())`  | Dropout rate will be tuned (globally for all layers)|
+#'   | lr | `dnn(…, lr = tune())`  |Learning rate will be tuned|
+#'   | batchsize | `dnn(…, batchsize = tune())`  | batch size will be tuned |
+#'   | epochs | `dnn(…, batchsize = tune())`  | batchsize will be tuned |
+#'
+#'   The hyperparameters are tuned by random search (i.e., random values for the hyperparameters within a specified range) and by cross-validation. The exact tuning regime can be specified with [config_tuning].
+#'
+#' Note that hyperparameter tuning can be expensive. We have implemented an option to parallelize hyperparameter tuning, including parallelization over one or more GPUs (the hyperparameter evaluation is parallelized, not the CV). This can be especially useful for small models. For example, if you have 4 GPUs, 20 CPU cores, and 20 steps (random samples from the random search), you could run `dnn(..., device="cuda",lr = tune(), batchsize=tune(), tuning=config_tuning(parallel=20, NGPU=4)`, which will distribute 20 model fits across 4 GPUs, so that each GPU will process 5 models (in parallel).
+#'
+#' As this is an experimental feature, we welcome feature requests and bug reports on our github site.
+#'
+#' For the custom values, all hyperparameters except for the hidden layers require a vector of values. Hidden layers expect a two-column matrix where the first column is the number of hidden nodes and the second column corresponds to the number of hidden layers.
+#'
+#'
 #'# How neural networks work
 #' In Multilayer Perceptron (MLP) networks, each neuron is connected to every neuron in the previous layer and every neuron in the subsequent layer. The value of each neuron is computed using a weighted sum of the outputs from the previous layer, followed by the application of an activation function. Specifically, the value of a neuron is calculated as the weighted sum of the outputs of the neurons in the previous layer, combined with a bias term. This sum is then passed through an activation function, which introduces non-linearity into the network. The calculated value of each neuron becomes the input for the neurons in the next layer, and the process continues until the output layer is reached. The choice of activation function and the specific weight values determine the network's ability to learn and approximate complex relationships between inputs and outputs.
 #'
@@ -126,21 +164,21 @@
 #' @author Christian Amesoeder, Maximilian Pichler
 #' @seealso \code{\link{predict.citodnn}}, \code{\link{plot.citodnn}},  \code{\link{coef.citodnn}},\code{\link{print.citodnn}}, \code{\link{summary.citodnn}}, \code{\link{continue_training}}, \code{\link{analyze_training}}, \code{\link{PDP}}, \code{\link{ALE}},
 #' @export
-dnn <- function(formula,
+dnn <- function(formula = NULL,
                 data = NULL,
-                loss = c("mse", "mae", "softmax", "cross-entropy", "gaussian", "binomial", "poisson"),
                 hidden = c(50L, 50L),
-                activation = c("relu", "leaky_relu", "tanh", "elu", "rrelu", "prelu", "softplus",
-                               "celu", "selu", "gelu", "relu6", "sigmoid", "softsign", "hardtanh",
-                               "tanhshrink", "softshrink", "hardshrink", "log_sigmoid"),
-                validation = 0,
+                activation = "selu",
                 bias = TRUE,
+                dropout = 0.0,
+                loss = c("mse", "mae", "softmax", "cross-entropy", "gaussian", "binomial", "poisson", "mvp", "nbinom"),
+                validation = 0,
                 lambda = 0.0,
                 alpha = 0.5,
-                dropout = 0.0,
                 optimizer = c("sgd","adam","adadelta", "adagrad", "rmsprop", "rprop"),
                 lr = 0.01,
-                batchsize = 32L,
+                batchsize = NULL,
+                burnin = 30,
+                baseloss = NULL,
                 shuffle = TRUE,
                 epochs = 100,
                 bootstrap = NULL,
@@ -150,120 +188,169 @@ dnn <- function(formula,
                 lr_scheduler = NULL,
                 custom_parameters = NULL,
                 device = c("cpu","cuda", "mps"),
-                early_stopping = FALSE) {
-  checkmate::assert(checkmate::checkMatrix(data), checkmate::checkDataFrame(data))
-  checkmate::qassert(activation, "S+[1,)")
-  checkmate::qassert(bias, "B+")
-  checkmate::qassert(lambda, "R1[0,)")
-  checkmate::qassert(validation, "R1[0,1)")
-  checkmate::qassert(dropout, "R+[0,1)")
-  checkmate::qassert(lr, "R+[0,)")
-  checkmate::qassert(plot,"B1")
-  checkmate::qassert(verbose,"B1")
-  checkmate::qassert(early_stopping,c("R1[1,)","B1"))
-  checkmate::qassert(device, "S+[3,)")
+                early_stopping = FALSE,
+                tuning = config_tuning(),
+                X = NULL,
+                Y = NULL) {
+
+
+  out <- list()
+
+  class(out) <- "citodnn"
+
+  tuner = check_hyperparameters(hidden = hidden ,
+                                bias = bias,
+                                activation = activation,
+                                lambda = lambda,
+                                alpha = alpha,
+                                dropout =dropout,
+                                batchsize = batchsize,
+                                epochs = epochs,
+                                lr = lr)
+
 
   device <- match.arg(device)
-  if(identical (activation, c("relu", "leaky_relu", "tanh", "elu", "rrelu", "prelu", "softplus",
-                              "celu", "selu", "gelu", "relu6", "sigmoid", "softsign", "hardtanh",
-                              "tanhshrink", "softshrink", "hardshrink", "log_sigmoid"))) activation<- "relu"
+
   if(!is.function(loss) & !inherits(loss,"family")){
     loss <- match.arg(loss)
+
+    if((device == "mps") & (loss %in% c("poisson", "nbinom"))) {
+      message("`poisson` or `nbinom` are not yet supported for `device=mps`, switching to `device=cpu`")
+      device = "cpu"
+    }
   }
+
+  if(inherits(loss,"family")) {
+    if((device == "mps") & (loss$family %in% c("poisson", "nbinom"))) {
+      message("`poisson` or `nbinom` are not yet supported for `device=mps`, switching to `device=cpu`")
+      device = "cpu"
+    }
+  }
+
   device_old = device
   device = check_device(device)
+  tmp_data = get_X_Y(formula, X, Y, data)
+  old_formula = tmp_data$old_formula
+  out$old_formula = old_formula
+  X = tmp_data$X
+  Y = tmp_data$Y
+  Z = tmp_data$Z
+  formula = tmp_data$formula
+  Z_formula = tmp_data$Z_terms
+  data = tmp_data$data
 
-  ### Generate X & Y data ###
-  if(!is.data.frame(data)) data <- data.frame(data)
-  old_formula = formula
-  if(!is.null(formula)){
-    fct_call <- match.call()
-    m <- match("formula", names(fct_call))
-    if(inherits(fct_call[3]$formula, "name")) fct_call[3]$formula <- eval(fct_call[3]$formula, envir = parent.env(environment()))
-    formula <- stats::as.formula(fct_call[m]$formula)
+  if(!is.null(Z)) {
+
+    Z_args = list()
+    for(i in 1:length(tmp_data$Z_args)) {
+      Z_args = append(Z_args, eval(tmp_data$Z_args[[i]]))
+    }
+
+    embeddings = list(inputs = ncol(Z),
+                      dims = apply(Z, 2, function(z) length(levels(as.factor(z)))), # input embeddings
+                      args = Z_args )
   } else {
-    formula <- stats::as.formula("~.")
+    embeddings = NULL
   }
-  X <- stats::model.matrix(formula, data)
-  Y <- stats::model.response(stats::model.frame(formula, data))
-  ylvls <- NULL
-  if(is.factor(Y)) ylvls <- levels(Y)
-  if(!inherits(Y, "matrix")) Y = as.matrix(Y)
+
+  if(is.null(batchsize)) batchsize = round(0.1*nrow(X))
+
+  # No training if no Y specified (E.g. used in mmn())
+
+  # TODO: check for redundancy
+  if(is.null(Y)) {
+    net <- build_dnn(input = ncol(X), output = NULL,
+                     hidden = hidden, activation = activation,
+                     bias = bias, dropout = dropout, embeddings = embeddings)
+    model_properties <- list(input = ncol(X),
+                             output = NULL,
+                             hidden = hidden,
+                             activation = activation,
+                             bias = bias,
+                             dropout = dropout,
+                             embeddings = embeddings)
+
+    out$net <- net
+    out$call <- match.call()
+    out$call$formula <- stats::terms.formula(formula, data=data)
+    out$Z_formula = Z_formula
+    out$data <- list(X = X, Y = NULL, data = data, Z = Z)
+    out$data$xlvls <- lapply(data[,sapply(data, is.factor), drop = F], function(j) levels(j))
+    out$model_properties <- model_properties
+    return(out)
+  }
 
 
-
-  loss_obj <- get_loss(loss)
-
-  responses = NULL
-  response_column = NULL
-  responses = ylvls
-  if(is.null(responses)) responses = as.character(LHSForm(formula))
-  if(inherits(loss_obj$call, "character")) { if(loss_obj$call == "softmax") response_column = as.character(LHSForm(formula)) }
-  if(ncol(Y) > 1) responses = colnames(Y)
-
-  if(!is.null(loss_obj$parameter)) loss_obj$parameter <- list(scale = loss_obj$parameter)
+  loss_obj <- get_loss(loss, device = device, X = X, Y = Y)
+  if(!is.null(loss_obj$parameter)) loss_obj$parameter <- list(parameter = loss_obj$parameter)
   if(!is.null(custom_parameters)){
     if(!inherits(custom_parameters,"list")){
       warning("custom_parameters has to be list")
     }else{
       custom_parameters<- lapply(custom_parameters,function(x) torch::torch_tensor(x, requires_grad = TRUE, device = device))
       loss_obj$parameter <- append(loss_obj$parameter, unlist(custom_parameters))
-
-      }
+    }
   }
 
-  y_dim <- ncol(Y)
-  y_dtype <- torch::torch_float32()
-  if(is.character(Y)) {
-    y_dim <- length(unique(as.integer(as.factor(Y[,1]))))
-    Y <- matrix(as.integer(as.factor(Y[,1])), ncol = 1L)
-    if(inherits(loss_obj$call, "family")){
-      if(loss_obj$call$family == "binomial") {
-        Y <- torch::as_array(torch::nnf_one_hot(torch::torch_tensor(Y, dtype=torch::torch_long() ))$squeeze())
-        Y_base = matrix(apply(as.matrix(Y), 2, mean), nrow(Y), ncol(Y), byrow = TRUE)
+  loss.fkt <- loss_obj$loss
+  if(!is.null(loss_obj$parameter)) list2env(loss_obj$parameter,envir = environment(fun= loss.fkt))
 
-      }}
+  response_column <- NULL
+  if(inherits(loss_obj$call, "character") && loss_obj$call == "softmax") response_column = as.character(LHSForm(formula)) #Gibt die RHS aus, falls keine LHS vorhanden. Relevant?
+
+  targets <- format_targets(Y, loss_obj)
+  Y_torch <- targets$Y
+  Y_transformed = as.matrix(Y_torch)
+  Y_base <- targets$Y_base
+  y_dim <- targets$y_dim
+  ylvls <- targets$ylvls
+  responses <- targets$responses
+
+  X_torch <- torch::torch_tensor(X)
+  if(!is.null(embeddings)) {
+    Z_torch = torch::torch_tensor(Z, dtype = torch::torch_long())
+  } else {
+    Z_torch = NULL
   }
 
-  Y_base = matrix(apply(as.matrix(Y), 2, mean), nrow(Y), ncol(Y), byrow = TRUE)
+  ### Hyperparameter tuning ###
 
-  if(!is.function(loss_obj$call)){
-    if(all(loss_obj$call == "softmax")) {
-      prop = as.vector(table(Y)/sum(table(Y)))
-        Y_base = matrix(prop, nrow = dim(X)[1], ncol = length(prop), byrow = TRUE) #  *stats::model.matrix(~0+., data = data.frame(Y = as.factor(Y)))
-        y_dtype = torch::torch_long()
-      }
+  if(length(tuner) != 0 ) {
+    parameters = as.list(match.call())
+    parameters[!nzchar(names(parameters))] = NULL
+    #parameters$hidden = hidden
+    model = tuning_function(tuner, parameters, loss.fkt,loss_obj, X, Y, Z, data, old_formula, tuning, Y_torch, loss, device_old) # add Z....
+    return(model)
   }
 
 
-  if(is.null(bootstrap)) {
+  if(is.null(bootstrap) || !bootstrap) {
 
-    loss.fkt <- loss_obj$loss
-    if(!is.null(loss_obj$parameter)) list2env(loss_obj$parameter,envir = environment(fun= loss.fkt))
-    base_loss = as.numeric(loss.fkt(loss_obj$link(torch::torch_tensor(as.matrix(Y_base))), torch::torch_tensor(as.matrix(Y), dtype = y_dtype))$mean())
-
+    if(is.null(baseloss)) {
+      baseloss = as.numeric(loss.fkt(torch::torch_tensor(loss_obj$link(Y_base$cpu()), dtype = Y_base$dtype)$to(device = device), Y_torch$to(device = device))$mean()$cpu() )
+    }
     ### dataloader  ###
-    if(validation != 0){
-      valid <- sort(sample(c(1:nrow(X)),replace=FALSE,size = round(validation*nrow(X))))
-      train <- c(1:nrow(X))[-valid]
-      train_dl <- get_data_loader(X[train,],Y[train,], batch_size = batchsize, shuffle = shuffle, y_dtype=y_dtype)
-      valid_dl <- get_data_loader(X[valid,],Y[valid,], batch_size = batchsize, shuffle = shuffle, y_dtype=y_dtype)
-
-    }else{
-      train_dl <- get_data_loader(X,Y, batch_size = batchsize, shuffle = shuffle, y_dtype=y_dtype)
+    if(validation != 0) {
+      n_samples <- nrow(X)
+      valid <- sort(sample(c(1:n_samples), replace=FALSE, size = round(validation*n_samples)))
+      train <- c(1:n_samples)[-valid]
+      train_dl <- get_data_loader(X_torch[train,], Y_torch[train,], batch_size = batchsize, shuffle = shuffle, Z = Z_torch)
+      valid_dl <- get_data_loader(X_torch[valid,], Y_torch[valid,], batch_size = batchsize, shuffle = shuffle, Z = Z_torch)
+    } else {
+      train_dl <- get_data_loader(X_torch, Y_torch, batch_size = batchsize, shuffle = shuffle, Z = Z_torch)
       valid_dl <- NULL
     }
-    if((length(hidden)+1) != length(alpha)) alpha <- rep(alpha,length(hidden)+1)
 
-    net <- build_model(input = ncol(X), output = y_dim,
+    net <- build_dnn(input = ncol(X), output = y_dim,
                       hidden = hidden, activation = activation,
-                      bias = bias, dropout = dropout)
+                      bias = bias, dropout = dropout, embeddings = embeddings)
     model_properties <- list(input = ncol(X),
                              output = y_dim,
                              hidden = hidden,
                              activation = activation,
                              bias = bias,
-                             dropout = dropout)
+                             dropout = dropout,
+                             embeddings = embeddings)
     training_properties <- list(lr = lr,
                                lr_scheduler = lr_scheduler,
                                optimizer = optimizer,
@@ -275,19 +362,24 @@ dnn <- function(formula,
                                alpha = alpha,
                                batchsize = batchsize,
                                shuffle = shuffle,
-                               formula = formula)
+                               formula = formula,
+                               embeddings = embeddings)
     out <- list()
     class(out) <- "citodnn"
     out$net <- net
     out$call <- match.call()
-    out$call$formula <- stats::terms.formula(formula,data = data)
+    out$call$formula <- stats::terms.formula(formula, data=data)
+    out$Z_formula = Z_formula
+    out$old_formula = old_formula
     out$loss <- loss_obj
-    out$data <- list(X = X, Y = Y, data = data)
-    out$data$xlvls <- lapply(data[,sapply(data, is.factor), drop = F], function(j) levels(j) )
-    out$base_loss = base_loss
+    out$data <- list(X = X, Y = as.matrix(Y_torch), data = data, Z = Z)
+    # levels should be only saved for features in the model, otherwise we get warnings from the predict function
+    data_tmp = data[, labels(stats::terms(formula, data = data)), drop=FALSE]
+    out$data$xlvls <- lapply(data_tmp[,sapply(data_tmp, is.factor), drop = F], function(j) levels(j) )
+    out$base_loss = baseloss
     if(!is.null(ylvls))  {
       out$data$ylvls <- ylvls
-      out$data$xlvls <- out$data$xlvls[-which(as.character(formula[2]) == names(out$data$xlvls))]
+      out$data$xlvls <- out$data$xlvls[-which(names(out$data$xlvls) %in% as.character(formula[[2]]))]
     }
     if(validation != 0) out$data <- append(out$data, list(validation = valid))
     out$weights <- list()
@@ -297,6 +389,7 @@ dnn <- function(formula,
     out$training_properties <- training_properties
     out$device = device_old
     out$responses = responses
+    out$burnin = burnin
 
     ### training loop ###
     out <- train_model(model = out,epochs = epochs, device = device, train_dl = train_dl, valid_dl = valid_dl, verbose = verbose)
@@ -306,7 +399,6 @@ dnn <- function(formula,
     out <- list()
     class(out) <- "citodnnBootstrap"
 
-
     if(bootstrap_parallel == FALSE) {
       pb = progress::progress_bar$new(total = bootstrap, format = "[:bar] :percent :eta", width = round(getOption("width")/2))
       models = list()
@@ -314,21 +406,21 @@ dnn <- function(formula,
       for(b in 1:bootstrap) {
         indices <- sample(nrow(data),replace = TRUE)
         m = do.call(dnn, args = list(
-          formula = formula, data = data[indices,], loss = loss, hidden = hidden, activation = activation,
+          formula = old_formula, data = data[indices,], loss = loss, hidden = hidden, activation = activation,
           bias = bias, validation = validation,lambda = lambda, alpha = alpha,lr = lr, dropout = dropout,
           optimizer = optimizer,batchsize = batchsize,shuffle = shuffle, epochs = epochs, plot = FALSE, verbose = FALSE,
           bootstrap = NULL, device = device_old, custom_parameters = custom_parameters, lr_scheduler = lr_scheduler, early_stopping = early_stopping,
           bootstrap_parallel = FALSE
         ))
+        m$data$indices = indices
+        m$data$original = list(data = data, X = X, Y = Y_transformed, Z = Z)
         pb$tick()
         models[[b]] = m
       }
 
     } else {
       if(is.logical(bootstrap_parallel)) {
-        if(bootstrap_parallel) {
           bootstrap_parallel = parallel::detectCores() -1
-        }
       }
       if(is.numeric(bootstrap_parallel)) {
         backend = parabar::start_backend(bootstrap_parallel)
@@ -338,12 +430,14 @@ dnn <- function(formula,
       models <- parabar::par_lapply(backend, 1:bootstrap, function(i) {
         indices <- sample(nrow(data),replace = TRUE)
         m = do.call(dnn, args = list(
-          formula = formula, data = data[indices,], loss = loss, hidden = hidden, activation = activation,
+          formula = old_formula, data = data[indices,], loss = loss, hidden = hidden, activation = activation,
           bias = bias, validation = validation,lambda = lambda, alpha = alpha,lr = lr, dropout = dropout,
           optimizer = optimizer,batchsize = batchsize,shuffle = shuffle, epochs = epochs, plot = FALSE, verbose = FALSE,
           bootstrap = NULL, device = device_old, custom_parameters = custom_parameters, lr_scheduler = lr_scheduler, early_stopping = early_stopping,
           bootstrap_parallel = FALSE
         ))
+        m$data$indices = indices
+        m$data$original = list(data = data, X = X, Y = Y_transformed, Z = Z)
         m
       })
       if(!is.null(backend)) parabar::stop_backend(backend)
@@ -351,20 +445,25 @@ dnn <- function(formula,
     }
 
     out$models <- models
-    out$data <- list(X = X, Y = Y, data = data)
+    out$data <- list(X = X, Y = as.matrix(Y_torch), data = data, Z = Z)
     out$device = device_old
     out$responses = responses
     out$loss = loss_obj$call
     out$response_column = response_column
+    out$old_formula = old_formula
+
+    out$successfull = any(!sapply(models, function(m) m$successfull) == 0)
+
   }
   return(out)
 }
+
+
 
 #' Print class citodnn
 #'
 #' @param x a model created by \code{\link{dnn}}
 #' @param ... additional arguments
-#' @return prediction matrix
 #' @example /inst/examples/print.citodnn-example.R
 #' @return original object x gets returned
 #' @export
@@ -423,6 +522,7 @@ residuals.citodnn <- function(object,...){
 #' @param object a model of class citodnn created by \code{\link{dnn}}
 #' @param n_permute number of permutations performed. Default is \eqn{3 * \sqrt{n}}, where n euqals then number of samples in the training set
 #' @param device for calculating variable importance and conditional effects
+#' @param adjust_se adjust standard errors for importance (standard errors are multiplied with 1/sqrt(3) )
 #' @param ... additional arguments
 #' @return summary.citodnn returns an object of class "summary.citodnn", a list with components
 #' @export
@@ -434,8 +534,10 @@ summary.citodnn <- function(object, n_permute = NULL, device = NULL, ...){
   out$importance <- get_importance(object, n_permute, device)
   out$conditionalEffects = conditionalEffects(object, device = device)
   out$ACE = sapply(out$conditionalEffects, function(R) diag(R$mean))
+  if(!is.matrix(out$ACE )) out$ACE= matrix(out$ACE , ncol = 1L)
   colnames(out$ACE) = paste0("Response_", 1:ncol(out$ACE))
   out$ASCE = sapply(out$conditionalEffects, function(R) diag(R$sd))
+  if(!is.matrix(out$ASCE )) out$ASCE = matrix(out$ASCE , ncol = 1L)
   colnames(out$ASCE) = paste0("Response_", 1:ncol(out$ASCE))
   rownames(out$ASCE) = rownames(out$ACE)
   return(out)
@@ -468,20 +570,23 @@ print.summary.citodnn <- function(x, ... ){
 
 #' @rdname summary.citodnn
 #' @export
-summary.citodnnBootstrap <- function(object, n_permute = NULL, device = NULL, ...){
+summary.citodnnBootstrap <- function(object, n_permute = NULL, device = NULL, adjust_se = FALSE,...){
   object$models <- lapply(object$models, check_model)
   out <- list()
   class(out) <- "summary.citodnnBootstrap"
   if(is.null(device)) device = object$device
-  out$importance <- lapply(object$models, function(m) get_importance(m, n_permute, device = device))
+  out$importance <- lapply(object$models, function(m) get_importance(m, n_permute, device = device, ...))
   out$conditionalEffects <- lapply(object$models, function(m) conditionalEffects(m, device = device))
 
   if(!is.null(out$importance[[1]])){
     res_imps = list()
     for(i in 2:ncol(out$importance[[1]])) {
-      tmp = sapply(out$importance, function(X) X[,i])
+      tmp = sapply(out$importance, function(X) X[,i, drop=FALSE])
+      if(inherits(tmp, "list")) tmp = do.call(cbind, tmp)
       imps = apply(tmp, 1, mean) - 1
       imps_se = apply(tmp, 1, stats::sd)
+
+      if(adjust_se) imps_se = imps_se * 1/sqrt(3)
 
       coefmat = cbind(
         as.vector(as.matrix(imps)),
@@ -506,6 +611,8 @@ summary.citodnnBootstrap <- function(object, n_permute = NULL, device = NULL, ..
 
   for(i in 1:length(out$conditionalEffects[[1]])) {
     tmp = sapply(1:length(out$conditionalEffects), function(j) diag(out$conditionalEffects[[j]][[i]]$mean))
+    if(inherits(tmp, "list")) tmp = do.call(cbind, tmp)
+    if(is.vector(tmp)) tmp = matrix(tmp, nrow = 1L)
     eff = apply(tmp, 1, mean)
     eff_se = apply(tmp, 1, stats::sd)
 
@@ -527,6 +634,8 @@ summary.citodnnBootstrap <- function(object, n_permute = NULL, device = NULL, ..
 
   for(i in 1:length(out$conditionalEffects[[1]])) {
     tmp = sapply(1:length(out$conditionalEffects), function(j) diag(out$conditionalEffects[[j]][[i]]$sd))
+    if(inherits(tmp, "list")) tmp = do.call(cbind, tmp)
+    if(is.vector(tmp)) tmp = matrix(tmp, nrow = 1L)
     eff = apply(tmp, 1, mean)
     eff_se = apply(tmp, 1, stats::sd)
 
@@ -609,14 +718,18 @@ coef.citodnnBootstrap <- function(object, ...) {
 #'
 #' @param object a model created by \code{\link{dnn}}
 #' @param newdata new data for predictions
-#' @param type which value should be calculated, either raw response, output of link function or predicted class (in case of classification)
+#' @param type type of predictions. The default is on the scale of the linear predictor, "response" is on the scale of the response, and "class" means that class predictions are returned (if it is a classification task)
 #' @param device device on which network should be trained on.
+#' @param reduce predictions from bootstrapped model are by default reduced (mean, optional median or none)
 #' @param ... additional arguments
 #' @return prediction matrix
 #'
 #' @example /inst/examples/predict.citodnn-example.R
 #' @export
-predict.citodnn <- function(object, newdata = NULL, type=c("link", "response", "class"), device = c("cpu","cuda", "mps"),...) {
+predict.citodnn <- function(object, newdata = NULL,
+                            type=c("link", "response", "class"),
+                            device = c("cpu","cuda", "mps"),
+                            reduce = c("mean", "median", "none"),...) {
 
   checkmate::assert( checkmate::checkNull(newdata),
                      checkmate::checkMatrix(newdata),
@@ -628,7 +741,7 @@ predict.citodnn <- function(object, newdata = NULL, type=c("link", "response", "
 
   device <- match.arg(device)
 
-  if(type %in% c("link","class")) {
+  if(type %in% c("response","class")) {
     link <- object$loss$invlink
   }else{
     link = function(a) a
@@ -636,21 +749,34 @@ predict.citodnn <- function(object, newdata = NULL, type=c("link", "response", "
 
   device <- check_device(device)
 
+  Z = NULL
+
   object$net$to(device = device)
 
   ### TO DO: use dataloaders via get_data_loader function
   if(is.null(newdata)){
     newdata = torch::torch_tensor(object$data$X, device = device)
+    if(!is.null(object$model_properties$embeddings)) {
+      Z = torch::torch_tensor(object$data$Z, dtype = torch::torch_long(), device = device)
+    }
   } else {
+    copy_newdata = newdata
     if(is.data.frame(newdata)) {
       newdata <- stats::model.matrix(stats::as.formula(stats::delete.response(object$call$formula)), newdata,xlev = object$data$xlvls)
     } else {
       newdata <- stats::model.matrix(stats::as.formula(stats::delete.response(object$call$formula)), data.frame(newdata),xlev = object$data$xlvls)
     }
     newdata <- torch::torch_tensor(newdata, device = device)
+
+    if(!is.null(object$model_properties$embeddings)) {
+      tmp = do.call(cbind, lapply(object$Z_formula, function(term) copy_newdata[, term] ))
+      Z = torch::torch_tensor(tmp, dtype = torch::torch_long(), device = device)
+    }
+
   }
 
-  pred <- torch::as_array(link(object$net(newdata))$to(device="cpu"))
+  if(is.null(object$model_properties$embeddings)) pred <- torch::as_array(link(object$net(newdata))$to(device="cpu"))
+  else pred <- torch::as_array(link(object$net(newdata, Z))$to(device="cpu"))
 
   if(!is.null(object$data$ylvls)) colnames(pred) <- object$data$ylvls
   if(type == "class") pred <- as.factor(apply(pred,1, function(x) object$data$ylvls[which.max(x)]))
@@ -666,7 +792,11 @@ predict.citodnn <- function(object, newdata = NULL, type=c("link", "response", "
 
 #' @rdname predict.citodnn
 #' @export
-predict.citodnnBootstrap <- function(object, newdata = NULL, type=c("link", "response", "class"), device = c("cpu","cuda", "mps"),...) {
+predict.citodnnBootstrap <- function(object,
+                                     newdata = NULL,
+                                     type=c("link", "response", "class"),
+                                     device = c("cpu","cuda", "mps"),
+                                     reduce = c("mean", "median", "none"),...) {
 
   checkmate::assert( checkmate::checkNull(newdata),
                      checkmate::checkMatrix(newdata),
@@ -676,7 +806,15 @@ predict.citodnnBootstrap <- function(object, newdata = NULL, type=c("link", "res
   if(is.null(newdata)) newdata = object$data$X
 
   predictions = lapply(object$models, function(m) stats::predict(m, newdata = newdata, type = type, device = device))
-  return(abind::abind(predictions, along = 0L))
+  predictions = abind::abind(predictions, along = 0L)
+  reduce <- match.arg(reduce)
+  if(reduce == "mean") {
+    return(apply(predictions, 2:3, mean))
+  } else if(reduce == "median") {
+    return(apply(predictions, 2:3, stats::median))
+  } else {
+    return(predictions)
+  }
 }
 
 
@@ -693,6 +831,11 @@ predict.citodnnBootstrap <- function(object, newdata = NULL, type=c("link", "res
 #' @export
 plot.citodnn<- function(x, node_size = 1, scale_edges = FALSE,...){
 
+  if(!is.null(x$data$Z)) {
+    cat("Models with embeddings layers detected. Embedding layers can be currently not visualized.")
+    return(invisible(NULL))
+  }
+
   sapply(c("igraph","ggraph","ggplot2"),function(x)
     if (!requireNamespace(x, quietly = TRUE)) {
       stop(
@@ -704,7 +847,7 @@ plot.citodnn<- function(x, node_size = 1, scale_edges = FALSE,...){
   checkmate::qassert(scale_edges, "B1")
 
   weights <- coef.citodnn(x)
-  input <- ncol(weights[[1]][1][[1]])-1
+  input <- ncol(weights[[1]][1][[1]])
   structure <- data.frame(expand.grid(from=paste0("1;",c(1:input)),
                                       to = paste0("2;",c(1:(nrow(weights[[1]][1][[1]]))))),
                           value = scale(c(t(weights[[1]][1][[1]][1:input])), center=scale_edges,scale= scale_edges))
@@ -745,5 +888,8 @@ plot.citodnn<- function(x, node_size = 1, scale_edges = FALSE,...){
 plot.citodnnBootstrap <- function(x, node_size = 1, scale_edges = FALSE,which_model = 1,...){
  plot(x$models[[which_model]], node_size = node_size, scale_edges = scale_edges)
 }
+
+
+
 
 
